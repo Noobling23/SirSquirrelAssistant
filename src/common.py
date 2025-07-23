@@ -86,58 +86,62 @@ def save_match_screenshot(screenshot, top_left, bottom_right, template_path, mat
     print(f"Match saved at {output_path}")
 
 def match_image(template_path, threshold=0.8):
-    """Finds the image specified and returns the center coordinates, regardless of screen resolution,
-    and saves screenshots of each match found."""
-    
-    # Capture current screen and get dimensions
-    screenshot = capture_screen()
-    screenshot_height, screenshot_width = screenshot.shape[:2]
-    # Calculate scale factor
-    scale_factor_x = screenshot_width / 2560
-    scale_factor_y = screenshot_height / 1440
-    scale_factor = min(scale_factor_x,scale_factor_y)
-    # Load and resize the template image according to the scale factor
-    template = cv2.imread(template_path, cv2.IMREAD_COLOR)
-    if template is None:
-        raise FileNotFoundError(f"Template image '{template_path}' not found.")
-    
-    template = cv2.resize(template, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_LINEAR)
-    template_height, template_width = template.shape[:2]
-
-    # Perform template matching
-    result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
-
-    # Get locations where the match confidence exceeds the threshold
-    if scale_factor < 0.75:
-        threshold = threshold-0.05 #Testing for detecting on lower scales
-    locations = np.where(result >= threshold)
-    boxes = []
-
-    # Loop through all the matching locations and create bounding boxes
-    for pt in zip(*locations[::-1]):  # Switch columns and rows
-        top_left = pt
-        bottom_right = (top_left[0] + template_width, top_left[1] + template_height)
-        boxes.append([top_left[0], top_left[1], bottom_right[0], bottom_right[1]])
-
-    boxes = np.array(boxes)
-
-    # Apply non-maximum suppression to remove overlapping boxes
-    filtered_boxes = non_max_suppression_fast(boxes)
-
-    # List to hold the center coordinates of all filtered elements
-    found_elements = []
-    
-    # Save a screenshot of each matched region
-    for match_index, (x1, y1, x2, y2) in enumerate(filtered_boxes):
-        center_x = (x1 + x2) // 2
-        center_y = (y1 + y2) // 2
-        found_elements.append((center_x, center_y))
-    
-    if found_elements:
-        #save_match_screenshot(screenshot, (x1, y1), (x2, y2), template_path, match_index)
-        return sorted(found_elements)
-    # Return the list of center coordinates of all found elements or None if no elements found
-    return []
+    """Robust template matching with debug support and fallbacks"""
+    try:
+        screenshot = capture_screen()
+        
+        # Debug support
+        if os.getenv("DEBUG_IMAGES"):
+            cv2.imwrite("debug_current_screen.png", screenshot)
+            
+        # Try multiple template variations
+        template_variations = [
+            template_path,
+            template_path.replace(".png", "_v2.png"),
+            template_path.replace(".png", "_alt.png")
+        ]
+        
+        found_elements = []
+        screenshot_height, screenshot_width = screenshot.shape[:2]
+        scale_factor = min(screenshot_width/2560, screenshot_height/1440)
+        
+        for variation in template_variations:
+            if not os.path.exists(variation):
+                continue
+                
+            template = cv2.imread(variation)
+            if template is None:
+                continue
+                
+            # Scale template
+            template = cv2.resize(template, None, 
+                                fx=scale_factor, 
+                                fy=scale_factor,
+                                interpolation=cv2.INTER_LINEAR)
+            
+            # Match template
+            result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+            locs = np.where(result >= (threshold-0.05 if scale_factor < 0.75 else threshold))
+            
+            # Process matches
+            boxes = []
+            for pt in zip(*locs[::-1]):
+                boxes.append([pt[0], pt[1], 
+                            pt[0] + template.shape[1], 
+                            pt[1] + template.shape[0]])
+            
+            if boxes:
+                boxes = np.array(boxes)
+                filtered_boxes = non_max_suppression_fast(boxes)
+                found_elements.extend([((x1+x2)//2, (y1+y2)//2) 
+                                      for (x1,y1,x2,y2) in filtered_boxes])
+        
+        return sorted(found_elements) if found_elements else []
+        
+    except Exception as e:
+        logger.error(f"Image matching failed for {template_path}: {str(e)}")
+        error_screenshot()
+        return []
 
 def greyscale_match_image(template_path, threshold=0.75):
     """Finds the image specified and returns the center coordinates, regardless of screen resolution,

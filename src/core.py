@@ -47,14 +47,20 @@ def post_run_load():
     logger.info("Loaded back to Main Menu")
 
 def reconnect():
-    while(common.element_exist("pictures/general/server_error.png")):
-        common.sleep(6)
-        common.click_matching("pictures/general/retry.png")
-        common.mouse_move(200,200)
-    if common.element_exist("pictures/general/no_op.png"):
-        common.click_matching("pictures/general/close.png")
-        logger.info("COULD NOT RECONNECT TO THE SERVER. SHUTTING DOWN!")
-        os._exit(0)
+    """Updated reconnection logic"""
+    retries = 0
+    max_retries = 5
+    
+    while retries < max_retries:
+        if common.element_exist("pictures/general/server_error.png"):
+            common.sleep(6)
+            common.click_matching("pictures/general/retry.png")
+            retries += 1
+        else:
+            return True
+            
+    logger.error("Max reconnection attempts reached")
+    return False
 
 def battle():
     """Handles battles by mashing winrate, also handles skill checks and end of battle loading"""
